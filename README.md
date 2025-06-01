@@ -38,16 +38,38 @@ $env:OPENAI_API_KEY="sua-chave-openrouter"
 $env:OPENAI_API_BASE="https://openrouter.ai/api/v1"
 ```
 
-### 4. Inicie o servidor web
+### 4. Modelos Free Disponíveis
+A interface permite selecionar entre os seguintes modelos gratuitos do OpenRouter:
+- `deepseek/deepseek-prover-v2:free`
+- `nousresearch/nous-capybara-7b:free`
+- `openchat/openchat-7b:free`
+
+### 5. Inicie o servidor web
+Configure o aplicativo Flask e inicie o servidor:
 ```powershell
-python src/web_app.py
+$env:FLASK_APP="src/web_app.py"
+python -m flask run
 ```
 
-### 5. Use a interface web
+### Observação sobre encadeamento de comandos
+No PowerShell, use `;` para encadear comandos em vez de `&&`. Por exemplo:
+```powershell
+pip install -r requirements.txt; python -m flask run
+```
+
+### 6. Use a interface web
 Abra o navegador em http://127.0.0.1:5000/
 
 - Faça upload de arquivos CSV.
 - Faça perguntas em linguagem natural sobre os dados.
+- A interface agora exibe o modelo selecionado e a pergunta enviada junto com a resposta.
+
+### 7. Limite de Requisições
+Os modelos gratuitos possuem um limite de 50 requisições por dia. Caso o limite seja excedido, você verá o seguinte erro:
+```
+Erro: Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', 'code': 429, 'metadata': {'headers': {'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1748822400000'}, 'provider_name': None}}}
+```
+Para desbloquear mais requisições, adicione créditos no OpenRouter para aumentar o limite para 1000 requisições por dia.
 
 ## Estrutura do projeto
 - `src/web_app.py`: Interface web Flask.

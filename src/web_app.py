@@ -10,6 +10,13 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 csv_agent = CsvAgent()
 
+# List of free models available on OpenRouter
+FREE_MODELS = [
+    "deepseek/deepseek-prover-v2:free",
+    "nousresearch/nous-capybara-7b:free",
+    "openchat/openchat-7b:free"
+]
+
 HTML = '''
 <!doctype html>
 <title>CSV Query Agent</title>
@@ -25,7 +32,13 @@ function showProcessing() {
 </form>
 <h2>Ask a question about your CSV files:</h2>
 <form method=post action="/query" onsubmit="showProcessing()">
-  <input type=text name=query size=80 required>
+  <select name="model" required>
+    <option value="">Select a model</option>
+    {% for model in models %}
+    <option value="{{ model }}">{{ model }}</option>
+    {% endfor %}
+  </select>
+  <input type="text" name="question" placeholder="Ask your question here" required>
   <input type=submit value=Ask>
 </form>
 <div id="processing-indicator" style="display:none;color:blue;font-weight:bold;">Processando... Por favor, aguarde.</div>
@@ -39,7 +52,7 @@ def allowed_file(filename):
 @app.route('/', methods=['GET'])
 def index():
     files = os.listdir(UPLOAD_FOLDER)
-    return render_template_string(HTML, response=None, files=files)
+    return render_template_string(HTML, response=None, files=files, models=FREE_MODELS)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -56,10 +69,13 @@ def upload_file():
 
 @app.route('/query', methods=['POST'])
 def query():
-    query = request.form['query']
-    response = csv_agent.process_query(query)
+    selected_model = request.form.get('model')
+    question = request.form.get('question')
+    if not selected_model or not question:
+        return "Error: Model and question are required.", 400
+    response = csv_agent.process_query(question)
     files = os.listdir(UPLOAD_FOLDER)
-    return render_template_string(HTML, response=response, files=files)
+    return render_template_string(HTML, response=f"Model: {selected_model}\nQuestion: {question}\n\n{response}", files=files, models=FREE_MODELS)
 
 if __name__ == '__main__':
     if not os.path.exists(UPLOAD_FOLDER):

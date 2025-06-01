@@ -14,7 +14,7 @@ class CsvAgent:
             temperature=0,
             openai_api_key=os.environ.get('OPENAI_API_KEY'),
             openai_api_base=os.environ.get('OPENAI_API_BASE'),
-            model="deepseek/deepseek-prover-v2:free"  # Free model for analysis
+            model="deepseek/deepseek-prover-v2:free"  # Reverting to a previously working free model
         )
         self.agents = {}
         for file, df in self.dataframes.items():
@@ -33,6 +33,7 @@ class CsvAgent:
     def _load_csvs(self):
         for file in os.listdir(self.data_dir):
             if file.endswith('.csv'):
+                # Load full dataframe without sampling
                 df = pd.read_csv(os.path.join(self.data_dir, file))
                 self.dataframes[file] = df
 
@@ -42,7 +43,7 @@ class CsvAgent:
         for file, agent in self.agents.items():
             try:
                 answer = agent.invoke({"input": query})
-                responses.append(f"Arquivo: {file}\nPergunta enviada: {query}\nResposta: {answer['output']}")
+                responses.append(f"Arquivo: {file}\nResposta: {answer['output']}")
             except Exception as e:
-                responses.append(f"Arquivo: {file}\nPergunta enviada: {query}\nErro: {str(e)}")
+                responses.append(f"Arquivo: {file}\nErro: {str(e)}")
         return "\n\n".join(responses)
