@@ -2,9 +2,11 @@ from flask import Flask, request, render_template_string, redirect, url_for
 import os
 from agents.csv_agent import CsvAgent
 import sys
+from pyunpack import Archive
+from utils.file_unpacker import unpack_archives
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'data')
-ALLOWED_EXTENSIONS = {'csv'}
+ALLOWED_EXTENSIONS = {'csv', 'zip'}
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -61,9 +63,11 @@ def upload_file():
     file = request.files['file']
     if file.filename == '':
         return redirect(url_for('index'))
-    if file and allowed_file(file.filename):
+    if file:
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(filepath)
+        if file.filename.endswith('.zip'):
+            unpack_archives(app.config['UPLOAD_FOLDER'])
         csv_agent._load_csvs()  # Reload CSVs
     return redirect(url_for('index'))
 
@@ -73,7 +77,7 @@ def query():
     question = request.form.get('question')
     if not selected_model or not question:
         return "Error: Model and question are required.", 400
-    response = csv_agent.process_query(question)
+    response = csv_agent.process_query(question,selected_model)
     files = os.listdir(UPLOAD_FOLDER)
     return render_template_string(HTML, response=f"Model: {selected_model}\nQuestion: {question}\n\n{response}", files=files, models=FREE_MODELS)
 

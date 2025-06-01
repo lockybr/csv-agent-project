@@ -14,7 +14,6 @@ class CsvAgent:
             temperature=0,
             openai_api_key=os.environ.get('OPENAI_API_KEY'),
             openai_api_base=os.environ.get('OPENAI_API_BASE'),
-            model="deepseek/deepseek-prover-v2:free"  # Reverting to a previously working free model
         )
         self.agents = {}
         for file, df in self.dataframes.items():
@@ -34,15 +33,25 @@ class CsvAgent:
         for file in os.listdir(self.data_dir):
             if file.endswith('.csv'):
                 # Load full dataframe without sampling
-                df = pd.read_csv(os.path.join(self.data_dir, file))
-                self.dataframes[file] = df
+                try:
+                    df = pd.read_csv(os.path.join(self.data_dir, file), encoding='latin1', on_bad_lines='skip')
+                    self.dataframes[file] = df
+                except (UnicodeDecodeError, pd.errors.ParserError) as e:
+                    print(f"Erro ao carregar {file}: {e}")
 
-    def process_query(self, query):
+    def process_query(self, query, model=None):
+        # Create a new instance of OpenAI with the selected model
+        llm = OpenAI(
+            temperature=0,
+            openai_api_key=os.environ.get('OPENAI_API_KEY'),
+            openai_api_base=os.environ.get('OPENAI_API_BASE'),
+            model=model
+        )
         # Try to answer using all loaded CSVs
         responses = []
         for file, agent in self.agents.items():
             try:
-                answer = agent.invoke({"input": query})
+                answer = agent.invoke({"input": query}, llm=llm)
                 responses.append(f"Arquivo: {file}\nResposta: {answer['output']}")
             except Exception as e:
                 responses.append(f"Arquivo: {file}\nErro: {str(e)}")
