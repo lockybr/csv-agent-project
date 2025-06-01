@@ -1,3 +1,17 @@
+Esse é um agente criado para cumprir os desafios de caráter eliminatório propostos pelo curso I2A2
+
+Objetivo:
+• Criar um ou mais agentes que tornem possível a um usuário realizar perguntas sobre os arquivos CSV disponibilizados.
+• Exemplo: Qual é o fornecedor que teve maior montante recebido? Qual item teve maior volume entregue (em quantidade)? E assim por diante.
+
+Modo de operação:
+• Interface onde o usuário informa sua pergunta. O agente gera a resposta.
+• O(s) agente(s) deverá:
+  • selecionar o arquivo desejado
+  • carregar os dados
+  • fazer as queries
+  • gerar a resposta para o usuário.
+
 # CSV Query Agent (Python + LangChain + Flask)
 
 Este projeto permite que você faça perguntas em linguagem natural sobre arquivos CSV enviados, usando uma interface web simples e inteligência artificial (LangChain + OpenRouter).
