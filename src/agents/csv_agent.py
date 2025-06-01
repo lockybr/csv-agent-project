@@ -10,10 +10,17 @@ class CsvAgent:
         self.data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
         self._unpack_archives()
         self._load_csvs()
-        self.llm = OpenAI(temperature=0, openai_api_key=os.environ.get('OPENAI_API_KEY'), openai_api_base=os.environ.get('OPENAI_API_BASE'))
+        self.llm = OpenAI(
+            temperature=0,
+            openai_api_key=os.environ.get('OPENAI_API_KEY'),
+            openai_api_base=os.environ.get('OPENAI_API_BASE'),
+            model="deepseek/deepseek-prover-v2:free"  # Free model for analysis
+        )
         self.agents = {}
         for file, df in self.dataframes.items():
-            self.agents[file] = create_pandas_dataframe_agent(self.llm, df, verbose=False, allow_dangerous_code=True)
+            self.agents[file] = create_pandas_dataframe_agent(
+                self.llm, df, verbose=False, allow_dangerous_code=True, handle_parsing_errors=True
+            )
 
     def _unpack_archives(self):
         if not os.path.exists(self.data_dir):
@@ -34,8 +41,8 @@ class CsvAgent:
         responses = []
         for file, agent in self.agents.items():
             try:
-                answer = agent.run(query)
-                responses.append(f"Arquivo: {file}\nResposta: {answer}")
+                answer = agent.invoke({"input": query})
+                responses.append(f"Arquivo: {file}\nPergunta enviada: {query}\nResposta: {answer['output']}")
             except Exception as e:
-                responses.append(f"Arquivo: {file}\nErro: {str(e)}")
+                responses.append(f"Arquivo: {file}\nPergunta enviada: {query}\nErro: {str(e)}")
         return "\n\n".join(responses)
