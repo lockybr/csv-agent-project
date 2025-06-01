@@ -1,0 +1,23 @@
+{
+  "name": "csv-agent-project",
+  "version": "1.0.0",
+  "description": "A project that allows users to query CSV files through an agent.",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "ts-node src/app.ts",
+    "build": "tsc",
+    "test": "jest"
+  },
+  "dependencies": {
+    "csv-parser": "^3.0.0",
+    "typescript": "^4.5.0"
+  },
+  "devDependencies": {
+    "ts-node": "^10.0.0",
+    "jest": "^27.0.0",
+    "@types/jest": "^27.0.0",
+    "@types/node": "^16.0.0"
+  },
+  "author": "",
+  "license": "ISC"
+}
