@@ -1,0 +1,8 @@
+Flask
+pandas
+pyunpack
+langchain
+langchain-openai
+openai
+langchain-experimental
+tabulate
