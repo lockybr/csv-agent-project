@@ -1,25 +1,15 @@
 import os
+os.environ['OPENAI_API_KEY'] = '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'
 import zipfile
-import pandas as pd
-from langchain_openai import OpenAI
-from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
+from langchain.callbacks.manager import CallbackManager
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+from langchain_community.chat_models import ChatOpenAI
+from langchain.schema import HumanMessage
 
 class CsvAgent:
     def __init__(self):
-        self.dataframes = {}
         self.data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
         self._unpack_archives()
-        self._load_csvs()
-        self.llm = OpenAI(
-            temperature=0,
-            openai_api_key=os.environ.get('OPENAI_API_KEY'),
-            openai_api_base=os.environ.get('OPENAI_API_BASE'),
-        )
-        self.agents = {}
-        for file, df in self.dataframes.items():
-            self.agents[file] = create_pandas_dataframe_agent(
-                self.llm, df, verbose=False, allow_dangerous_code=True, handle_parsing_errors=True
-            )
 
     def _unpack_archives(self):
         if not os.path.exists(self.data_dir):
@@ -29,30 +19,46 @@ class CsvAgent:
                 with zipfile.ZipFile(os.path.join(self.data_dir, file), 'r') as zip_ref:
                     zip_ref.extractall(self.data_dir)
 
-    def _load_csvs(self):
+    def process_query(self, query, model, api_key):
+        effective_api_key = api_key if api_key else os.environ.get('OPENAI_API_KEY')
+
+        if not effective_api_key:
+            raise ValueError("No valid API key provided.")
+
+        chat = ChatOpenAI(
+            streaming=True,
+            callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
+            model_name=model,
+            temperature=0,
+            openai_api_key=effective_api_key,
+            openai_api_base="https://openrouter.ai/api/v1",
+            max_tokens=1500
+        )
+
+        responses = []
         for file in os.listdir(self.data_dir):
             if file.endswith('.csv'):
-                # Load full dataframe without sampling
                 try:
-                    df = pd.read_csv(os.path.join(self.data_dir, file), encoding='latin1', on_bad_lines='skip')
-                    self.dataframes[file] = df
-                except (UnicodeDecodeError, pd.errors.ParserError) as e:
-                    print(f"Erro ao carregar {file}: {e}")
+                    with open(os.path.join(self.data_dir, file), 'r', encoding='latin1') as f:
+                        csv_content = f.read()
 
-    def process_query(self, query, model=None):
-        # Create a new instance of OpenAI with the selected model
-        llm = OpenAI(
-            temperature=0,
-            openai_api_key=os.environ.get('OPENAI_API_KEY'),
-            openai_api_base=os.environ.get('OPENAI_API_BASE'),
-            model=model
-        )
-        # Try to answer using all loaded CSVs
-        responses = []
-        for file, agent in self.agents.items():
-            try:
-                answer = agent.invoke({"input": query}, llm=llm)
-                responses.append(f"Arquivo: {file}\nResposta: {answer['output']}")
-            except Exception as e:
-                responses.append(f"Arquivo: {file}\nErro: {str(e)}")
+                    message = HumanMessage(content=f"""
+                    Analise os dados do arquivo CSV abaixo e responda à pergunta: {query}
+
+                    Dados do arquivo {file}:
+                    {csv_content}
+
+                    Observação: 
+                    - Os aruivos que terminam com _Cabecalho.csv ou NotaFiscal.csv contêm o valor total da nota. Os arquivos que terminam com Item.csv contêm todos os itens/detahes que compõem a nota.
+                    - Use formatação adequada para valores monetários (R$ com ponto para milhares e vírgula para decimais)
+                    - Se não for possível responder com os dados disponíveis, indique isso claramente
+                    """)
+
+                    result = chat.invoke([message])
+                    responses.append(f"Arquivo: {file}\nResposta: {result.content}")
+
+                except Exception as e:
+                    print(f"Error processing file {file}: {str(e)}")
+                    responses.append(f"Arquivo: {file}\nErro: Não foi possível processar a resposta. Detalhes: {str(e)}")
+        
         return "\n\n".join(responses)

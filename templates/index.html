@@ -49,7 +49,13 @@
         </select>
         <label for="question">Enter your question:</label>
         <input type="text" id="question" name="question" required>
+        <label for="api_key">API Key:</label>
+        <input type="text" id="api_key" name="api_key" value="{{ api_key }}">
         <button type="submit">Submit</button>
     </form>
+    {% if response %}
+        <h3>Response:</h3>
+        <p>{{ response }}</p>
+    {% endif %}
 </body>
 </html>

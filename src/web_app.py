@@ -1,23 +1,35 @@
 from flask import Flask, request, render_template_string, redirect, url_for
 import os
 from agents.csv_agent import CsvAgent
-import sys
-from pyunpack import Archive
 from utils.file_unpacker import unpack_archives
+import requests
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'data')
 ALLOWED_EXTENSIONS = {'csv', 'zip'}
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.jinja_env.cache = None
 csv_agent = CsvAgent()
 
-# List of free models available on OpenRouter
-FREE_MODELS = [
-    "deepseek/deepseek-prover-v2:free",
-    "nousresearch/nous-capybara-7b:free",
-    "openchat/openchat-7b:free"
-]
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
+
+def fetch_free_models():
+    try:
+        headers = {"Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY', '')}"}
+        response = requests.get(OPENROUTER_API_URL, headers=headers)
+        response.raise_for_status()
+        all_models = response.json().get('data', [])
+        free_models = [
+            model['id'] for model in all_models
+            if 'free' in model.get('name', '').lower()
+        ]
+        return free_models
+    except Exception:
+        return []
+
+FREE_MODELS = fetch_free_models()
 
 HTML = '''
 <!doctype html>
@@ -25,6 +37,7 @@ HTML = '''
 <script>
 function showProcessing() {
   document.getElementById('processing-indicator').style.display = 'block';
+  document.getElementById('response-container').innerHTML = ''; 
 }
 </script>
 <h1>Upload CSV File</h1>
@@ -37,24 +50,37 @@ function showProcessing() {
   <select name="model" required>
     <option value="">Select a model</option>
     {% for model in models %}
-    <option value="{{ model }}">{{ model }}</option>
+    <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
     {% endfor %}
   </select>
-  <input type="text" name="question" placeholder="Ask your question here" required>
+  <br><br>
+  <input type="text" name="question" placeholder="Ask your question here" required value="{{ question }}">
+  <input type="text" name="api_key" placeholder="Enter your API key here (optional)" value="{{ api_key }}">
   <input type=submit value=Ask>
 </form>
 <div id="processing-indicator" style="display:none;color:blue;font-weight:bold;">Processando... Por favor, aguarde.</div>
-{% if response %}<h3>Response:</h3><pre>{{ response }}</pre>{% endif %}
+<div id="response-container">
+  {% if response %}<h3>Response:</h3><pre>{{ response }}</pre>{% endif %}
+</div>
 {% if files %}<h3>Available CSVs:</h3><ul>{% for f in files %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
 '''
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-@app.route('/', methods=['GET'])
+@app.route('/', methods=['GET', 'POST'])
 def index():
+    user_api_key = ''
+    response = ''
+    question = ''
+    model = ''
+
+    if request.method == 'POST':
+        question = request.form.get('question', '')
+        user_api_key = request.form.get('api_key', '')
+        model = request.form.get('model', '')
+        api_key = user_api_key if user_api_key else os.environ.get('OPENAI_API_KEY')
+        response = csv_agent.process_query(question, model=model, api_key=api_key)
+
     files = os.listdir(UPLOAD_FOLDER)
-    return render_template_string(HTML, response=None, files=files, models=FREE_MODELS)
+    return render_template_string(HTML, response=response, files=files, models=FREE_MODELS, api_key=user_api_key, question=question, selected_model=model)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -63,26 +89,29 @@ def upload_file():
     file = request.files['file']
     if file.filename == '':
         return redirect(url_for('index'))
-    if file:
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    if file and ('.' in file.filename and file.filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS):
+        filepath = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(filepath)
         if file.filename.endswith('.zip'):
-            unpack_archives(app.config['UPLOAD_FOLDER'])
-        csv_agent._load_csvs()  # Reload CSVs
+            unpack_archives(UPLOAD_FOLDER)
     return redirect(url_for('index'))
 
 @app.route('/query', methods=['POST'])
 def query():
-    selected_model = request.form.get('model')
-    question = request.form.get('question')
-    if not selected_model or not question:
-        return "Error: Model and question are required.", 400
-    response = csv_agent.process_query(question,selected_model)
+    question = request.form.get('question', '')
+    user_api_key = request.form.get('api_key', '')
+    model = request.form.get('model', '')
+    api_key = user_api_key if user_api_key else os.environ.get('OPENAI_API_KEY')
+    response = csv_agent.process_query(question, model=model, api_key=api_key)
     files = os.listdir(UPLOAD_FOLDER)
-    return render_template_string(HTML, response=f"Model: {selected_model}\nQuestion: {question}\n\n{response}", files=files, models=FREE_MODELS)
+    return render_template_string(HTML, response=response, files=files, models=FREE_MODELS, api_key=user_api_key, question=question, selected_model=model)
+
+@app.route('/debug-html', methods=['GET'])
+def debug_html():
+    rendered_html = render_template_string(HTML, response='', files=os.listdir(UPLOAD_FOLDER), models=FREE_MODELS, api_key='')
+    return rendered_html, 200
 
 if __name__ == '__main__':
     if not os.path.exists(UPLOAD_FOLDER):
         os.makedirs(UPLOAD_FOLDER)
-    print('Starting Flask server on http://127.0.0.1:5000 or http://localhost:5000')
     app.run(host='0.0.0.0', port=5000, debug=True)
