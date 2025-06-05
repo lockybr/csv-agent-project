@@ -1,9 +1,8 @@
 import os
-os.environ['OPENAI_API_KEY'] = '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'
 import zipfile
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
 
 class CsvAgent:
@@ -20,22 +19,31 @@ class CsvAgent:
                     zip_ref.extractall(self.data_dir)
 
     def process_query(self, query, model, api_key):
-        effective_api_key = api_key if api_key else os.environ.get('OPENAI_API_KEY')
+        # Se o usuário informar a key no campo, usa ela. Caso contrário, recupera do ambiente.
+        effective_api_key = api_key.strip() if api_key else os.environ.get('OPENROUTER_API_KEY')
 
         if not effective_api_key:
-            raise ValueError("No valid API key provided.")
+            return "Erro: Nenhuma API key válida foi fornecida. (OPENROUTER_API_KEY não encontrada no ambiente e não foi informada no formulário)"
 
-        chat = ChatOpenAI(
-            streaming=True,
-            callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
-            model_name=model,
-            temperature=0,
-            openai_api_key=effective_api_key,
-            openai_api_base="https://openrouter.ai/api/v1",
-            max_tokens=1500
-        )
+        try:
+            chat = ChatOpenAI(
+                streaming=True,
+                callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]),
+                model_name=model,
+                temperature=0,
+                openai_api_key=effective_api_key,
+                openai_api_base="https://openrouter.ai/api/v1",
+                max_tokens=1500
+            )
+        except Exception as e:
+            return f"Erro ao inicializar o modelo: {str(e)}"
 
         responses = []
+        # Só exibe a API key (parcial) se o usuário NÃO informar nada no campo
+        if not api_key and effective_api_key:
+            key_display = effective_api_key[:4] + "..." + effective_api_key[-4:]
+            responses.append(f"[OS_ENV_KEY] Usando API key do ambiente: {key_display}")
+
         for file in os.listdir(self.data_dir):
             if file.endswith('.csv'):
                 try:
@@ -58,7 +66,13 @@ class CsvAgent:
                     responses.append(f"Arquivo: {file}\nResposta: {result.content}")
 
                 except Exception as e:
-                    print(f"Error processing file {file}: {str(e)}")
-                    responses.append(f"Arquivo: {file}\nErro: Não foi possível processar a resposta. Detalhes: {str(e)}")
-        
+                    msg = str(e)
+                    if '401' in msg or 'No auth credentials' in msg:
+                        responses.append(f"Arquivo: {file}\nErro: Falha de autenticação. Verifique se sua API key do OpenRouter está correta e ativa.")
+                        break
+                    elif '429' in msg:
+                        responses.append(f"Arquivo: {file}\nErro: Limite de requisições atingido. Tente novamente mais tarde ou adicione créditos ao OpenRouter.")
+                        break
+                    else:
+                        responses.append(f"Arquivo: {file}\nErro: Não foi possível processar a resposta. Detalhes: {msg}")
         return "\n\n".join(responses)

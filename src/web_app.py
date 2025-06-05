@@ -2,6 +2,8 @@ from flask import Flask, request, render_template_string, redirect, url_for
 import os
 from agents.csv_agent import CsvAgent
 from utils.file_unpacker import unpack_archives
+import logging
+from datetime import datetime
 import requests
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'data')
@@ -15,21 +17,21 @@ csv_agent = CsvAgent()
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
 
-def fetch_free_models():
+def fetch_models(free_only=True):
     try:
         headers = {"Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY', '')}"}
         response = requests.get(OPENROUTER_API_URL, headers=headers)
         response.raise_for_status()
         all_models = response.json().get('data', [])
-        free_models = [
-            model['id'] for model in all_models
-            if 'free' in model.get('name', '').lower()
-        ]
-        return free_models
+        if free_only:
+            return [model['id'] for model in all_models if 'free' in model.get('name', '').lower()]
+        else:
+            return [model['id'] for model in all_models]
     except Exception:
         return []
 
-FREE_MODELS = fetch_free_models()
+FREE_MODELS = fetch_models(free_only=True)
+ALL_MODELS = fetch_models(free_only=False)
 
 HTML = '''
 <!doctype html>
@@ -37,7 +39,10 @@ HTML = '''
 <script>
 function showProcessing() {
   document.getElementById('processing-indicator').style.display = 'block';
-  document.getElementById('response-container').innerHTML = ''; 
+  document.getElementById('response-container').innerHTML = '';
+}
+function toggleModelList() {
+  document.getElementById('modelForm').submit();
 }
 </script>
 <h1>Upload CSV File</h1>
@@ -46,7 +51,9 @@ function showProcessing() {
   <input type=submit value=Upload>
 </form>
 <h2>Ask a question about your CSV files:</h2>
-<form method=post action="/query" onsubmit="showProcessing()">
+<form id="modelForm" method=post action="/" onsubmit="showProcessing()">
+  <label><input type="checkbox" name="free_only" value="1" onchange="toggleModelList()" {% if free_only %}checked{% endif %}> Free Models Only</label>
+  <br>
   <select name="model" required>
     <option value="">Select a model</option>
     {% for model in models %}
@@ -71,16 +78,22 @@ def index():
     response = ''
     question = ''
     model = ''
+    free_only = True
 
     if request.method == 'POST':
         question = request.form.get('question', '')
         user_api_key = request.form.get('api_key', '')
         model = request.form.get('model', '')
-        api_key = user_api_key if user_api_key else os.environ.get('OPENAI_API_KEY')
-        response = csv_agent.process_query(question, model=model, api_key=api_key)
+        # Corrige: checkbox envia 'on' se desmarcado, '1' se marcado
+        free_only = request.form.get('free_only') == '1'
+        if question and model:
+            api_key = user_api_key if user_api_key else os.environ.get('OPENROUTER_API_KEY')
+            response = csv_agent.process_query(question, model=model, api_key=api_key)
+        # Se não, só atualiza a lista de modelos
 
     files = os.listdir(UPLOAD_FOLDER)
-    return render_template_string(HTML, response=response, files=files, models=FREE_MODELS, api_key=user_api_key, question=question, selected_model=model)
+    models = FREE_MODELS if free_only else ALL_MODELS
+    return render_template_string(HTML, response=response, files=files, models=models, api_key=user_api_key, question=question, selected_model=model, free_only=free_only)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -89,27 +102,58 @@ def upload_file():
     file = request.files['file']
     if file.filename == '':
         return redirect(url_for('index'))
-    if file and ('.' in file.filename and file.filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS):
-        filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+    if file:
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(filepath)
         if file.filename.endswith('.zip'):
-            unpack_archives(UPLOAD_FOLDER)
+            unpack_archives(app.config['UPLOAD_FOLDER'])
+        csv_agent._load_csvs()
     return redirect(url_for('index'))
 
 @app.route('/query', methods=['POST'])
 def query():
-    question = request.form.get('question', '')
-    user_api_key = request.form.get('api_key', '')
-    model = request.form.get('model', '')
-    api_key = user_api_key if user_api_key else os.environ.get('OPENAI_API_KEY')
-    response = csv_agent.process_query(question, model=model, api_key=api_key)
+    selected_model = request.form.get('model')
+    question = request.form.get('question')
+    user_api_key = request.form.get('api_key')
     files = os.listdir(UPLOAD_FOLDER)
-    return render_template_string(HTML, response=response, files=files, models=FREE_MODELS, api_key=user_api_key, question=question, selected_model=model)
+    free_only = request.form.get('free_only') == '1'
+
+    if not selected_model or not question:
+        return "Error: Model and question are required.", 400
+
+    api_key = user_api_key.strip() if user_api_key and user_api_key.strip() else os.environ.get('OPENAI_API_KEY')
+
+    if not api_key:
+        return render_template_string(HTML, response="Error: No valid API key provided. Please provide a valid API key.", files=files, models=FREE_MODELS, api_key=user_api_key)
+
+    if len(api_key) < 10:
+        return render_template_string(HTML, response="Error: Invalid API key format. Please check your API key.", files=files, models=FREE_MODELS, api_key=user_api_key)
+
+    if free_only and selected_model not in FREE_MODELS:
+        return render_template_string(HTML, response=f"Error: The selected model '{selected_model}' is not supported or unavailable.", files=files, models=FREE_MODELS, api_key=user_api_key)
+
+    try:
+        response = csv_agent.process_query(question, selected_model, api_key=api_key)
+    except ValueError as e:
+        if "402" in str(e):
+            response = "Error: Insufficient credits. Please check your OpenRouter account or reduce query complexity."
+        else:
+            response = f"Error: {str(e)}"
+
+    files = os.listdir(UPLOAD_FOLDER)
+    api_key_display = user_api_key.strip() if user_api_key and user_api_key.strip() else '[OS Environment]'
+    return render_template_string(HTML, response=f"Model: {selected_model}\nQuestion: {question}\nAPI Key: {api_key_display}\n\n{response}", files=files, models=FREE_MODELS, api_key=user_api_key, question=question, selected_model=selected_model, api_key_display=api_key_display)
 
 @app.route('/debug-html', methods=['GET'])
 def debug_html():
     rendered_html = render_template_string(HTML, response='', files=os.listdir(UPLOAD_FOLDER), models=FREE_MODELS, api_key='')
     return rendered_html, 200
+
+@app.before_request
+def log_request_info():
+    print(f"[{datetime.now()}] Incoming request: {request.method} {request.url}")
+    print(f"Headers: {request.headers}")
+    print(f"Remote Address: {request.remote_addr}")
 
 if __name__ == '__main__':
     if not os.path.exists(UPLOAD_FOLDER):
